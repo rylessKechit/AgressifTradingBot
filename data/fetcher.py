@@ -79,21 +79,9 @@ class DataFetcher:
             raise
     
     def fetch_historical_ohlcv(self, symbol, timeframe, start_date=None, end_date=None, limit=1000, 
-                              save_to_file=True, use_cache=True):
+                          save_to_file=True, use_cache=True):
         """
         Récupère les données OHLCV historiques depuis l'exchange
-        
-        Args:
-            symbol (str): Symbole de la paire (ex: BTC/USDT)
-            timeframe (str): Timeframe (ex: 1m, 5m, 15m, 1h, 4h, 1d)
-            start_date (datetime, optional): Date de début
-            end_date (datetime, optional): Date de fin
-            limit (int, optional): Nombre maximum de bougies par requête
-            save_to_file (bool, optional): Sauvegarder les données dans un fichier
-            use_cache (bool, optional): Utiliser les données en cache si disponibles
-        
-        Returns:
-            pd.DataFrame: DataFrame avec les données OHLCV
         """
         # Valeurs par défaut pour les dates
         if start_date is None:
@@ -101,27 +89,15 @@ class DataFetcher:
         if end_date is None:
             end_date = datetime.now()
         
-        # Vérifier si les données sont en cache et à jour
-        filename = f"{symbol.replace('/', '_')}_{timeframe}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
-        filepath = os.path.join(DATA_DIR, self.exchange_id, filename)
+        logger.info(f"Récupération des données pour {symbol} sur {timeframe} de {start_date} à {end_date}")
         
-        if use_cache and os.path.exists(filepath):
-            # Si la date de fin est aujourd'hui, vérifier si les données sont récentes (< 1 heure)
-            if end_date.date() == datetime.now().date():
-                file_modified_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-                if datetime.now() - file_modified_time < timedelta(hours=1):
-                    logger.info(f"Utilisation des données en cache pour {symbol} {timeframe}")
-                    return pd.read_csv(filepath, index_col=0, parse_dates=True)
-            else:
-                # Si la date de fin est dans le passé, utiliser les données en cache
-                logger.info(f"Utilisation des données en cache pour {symbol} {timeframe}")
-                return pd.read_csv(filepath, index_col=0, parse_dates=True)
+        # Vérification du cache...
         
         # Convertir les dates en timestamps
         since = int(start_date.timestamp() * 1000)
         until = int(end_date.timestamp() * 1000)
         
-        logger.info(f"Récupération des données historiques pour {symbol} {timeframe} de {start_date} à {end_date}")
+        logger.info(f"Récupération des données entre {since} et {until} ms")
         
         # Récupérer les données par lots
         all_ohlcv = []
@@ -129,6 +105,13 @@ class DataFetcher:
         
         while current_since < until:
             try:
+                logger.info(f"Récupération depuis {datetime.fromtimestamp(current_since/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # Vérifier si l'exchange est initialisé
+                if not self.exchange:
+                    logger.error("Exchange non initialisé")
+                    break
+                    
                 ohlcv = self.exchange.fetch_ohlcv(
                     symbol=symbol,
                     timeframe=timeframe,
@@ -137,8 +120,10 @@ class DataFetcher:
                 )
                 
                 if not ohlcv or len(ohlcv) == 0:
+                    logger.warning(f"Aucune donnée récupérée depuis {datetime.fromtimestamp(current_since/1000)}")
                     break
                     
+                logger.info(f"Récupéré {len(ohlcv)} bougies depuis {datetime.fromtimestamp(current_since/1000)}")
                 all_ohlcv.extend(ohlcv)
                 
                 # Mise à jour du timestamp pour la prochaine requête
@@ -148,7 +133,7 @@ class DataFetcher:
                 time.sleep(self.exchange.rateLimit / 1000)
                 
             except Exception as e:
-                logger.error(f"Erreur lors de la récupération des données pour {symbol} {timeframe}: {e}")
+                logger.error(f"Erreur lors de la récupération des données: {e}")
                 # Attendre un peu plus longtemps en cas d'erreur
                 time.sleep(5)
                 # Réessayer avec un timestamp plus récent
@@ -166,16 +151,22 @@ class DataFetcher:
         # Enlever les doublons potentiels
         df = df[~df.index.duplicated(keep='first')]
         
-        # Filtrer les données par date (pour s'assurer qu'on n'a pas de données en dehors de la plage demandée)
-        df = df[(df.index >= pd.Timestamp(start_date)) & (df.index <= pd.Timestamp(end_date))]
+        # Afficher des statistiques sur les données
+        logger.info(f"Données récupérées: {len(df)} bougies de {df.index.min()} à {df.index.max()}")
+        logger.info(f"Plage de prix: {df['low'].min()} - {df['high'].max()}")
+        logger.info(f"Volume total: {df['volume'].sum()}")
         
-        # Sauvegarder dans un fichier si demandé
-        if save_to_file:
-            df.to_csv(filepath)
-            logger.info(f"Données sauvegardées dans {filepath}")
+        # Vérifier la présence de NaN
+        if df.isnull().any().any():
+            logger.warning("Les données contiennent des valeurs NaN")
+            # Compter les valeurs NaN par colonne
+            for col in df.columns:
+                nan_count = df[col].isnull().sum()
+                if nan_count > 0:
+                    logger.warning(f"Colonne {col}: {nan_count} valeurs NaN")
         
         return df
-    
+
     def fetch_ticker(self, symbol):
         """
         Récupère le ticker actuel pour un symbole

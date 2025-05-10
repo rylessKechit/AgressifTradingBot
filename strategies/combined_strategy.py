@@ -64,12 +64,6 @@ class CombinedStrategy(BaseStrategy):
     def generate_signals(self, data):
         """
         Génère les signaux de trading en combinant plusieurs stratégies
-        
-        Args:
-            data (pd.DataFrame): DataFrame avec les données et indicateurs
-            
-        Returns:
-            pd.Series: Série contenant les signaux (1=achat, -1=vente, 0=neutre)
         """
         # Initialiser les signaux à zéro
         signals = pd.Series(0, index=data.index)
@@ -88,59 +82,19 @@ class CombinedStrategy(BaseStrategy):
         mean_reversion_weight = self.mean_reversion_strategy.params.get('weight', 0.4)
         arbitrage_weight = 0.2 if self.has_arbitrage else 0.0
         
-        # Ajuster les poids en fonction de la volatilité si demandé
-        if self.params.get('adjust_weights_by_volatility', True) and 'atr_pct_14' in data.columns:
-            # Calculer la volatilité relative
-            volatility = data['atr_pct_14'] / data['atr_pct_14'].rolling(window=100).mean()
-            
-            # Dans des marchés plus volatils, donner plus de poids au retour à la moyenne
-            # Dans des marchés moins volatils, donner plus de poids au suivi de tendance
-            for i in range(len(data)):
-                if not np.isnan(volatility.iloc[i]):
-                    if volatility.iloc[i] > 1.5:  # Haute volatilité
-                        # Augmenter le poids du retour à la moyenne
-                        local_trend_weight = trend_weight * 0.7
-                        local_mean_reversion_weight = mean_reversion_weight * 1.3
-                    elif volatility.iloc[i] < 0.7:  # Basse volatilité
-                        # Augmenter le poids du suivi de tendance
-                        local_trend_weight = trend_weight * 1.3
-                        local_mean_reversion_weight = mean_reversion_weight * 0.7
-                    else:  # Volatilité normale
-                        local_trend_weight = trend_weight
-                        local_mean_reversion_weight = mean_reversion_weight
-                    
-                    # Normaliser les poids
-                    total_weight = local_trend_weight + local_mean_reversion_weight + arbitrage_weight
-                    local_trend_weight /= total_weight
-                    local_mean_reversion_weight /= total_weight
-                    local_arbitrage_weight = arbitrage_weight / total_weight if arbitrage_weight > 0 else 0
-                    
-                    # Combinaison pondérée des signaux
-                    combined_signal = (
-                        trend_signals.iloc[i] * local_trend_weight +
-                        mean_reversion_signals.iloc[i] * local_mean_reversion_weight +
-                        arbitrage_signals.iloc[i] * local_arbitrage_weight
-                    )
-                    
-                    # Générer les signaux finaux selon les seuils
-                    if combined_signal > self.params.get('final_buy_threshold', 0.5):
-                        signals.iloc[i] = 1
-                    elif combined_signal < self.params.get('final_sell_threshold', -0.5):
-                        signals.iloc[i] = -1
-        else:
-            # Combinaison simple des signaux avec poids fixes
-            combined_signals = (
-                trend_signals * trend_weight +
-                mean_reversion_signals * mean_reversion_weight +
-                arbitrage_signals * arbitrage_weight
-            )
-            
-            # Générer les signaux finaux selon les seuils
-            signals[combined_signals > self.params.get('final_buy_threshold', 0.5)] = 1
-            signals[combined_signals < self.params.get('final_sell_threshold', -0.5)] = -1
+        # Combinaison simple des signaux avec poids fixes
+        combined_signals = (
+            trend_signals * trend_weight +
+            mean_reversion_signals * mean_reversion_weight +
+            arbitrage_signals * arbitrage_weight
+        )
+        
+        # Abaisser les seuils pour générer plus de signaux
+        signals[combined_signals > 0.3] = 1  # Signal d'achat (seuil abaissé)
+        signals[combined_signals < -0.3] = -1  # Signal de vente (seuil abaissé)
         
         return signals
-    
+
     def postprocess_signals(self, signals, data):
         """
         Post-traite les signaux générés pour éliminer les faux signaux

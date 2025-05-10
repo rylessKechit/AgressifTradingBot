@@ -76,19 +76,42 @@ class BaseStrategy(ABC):
         Returns:
             pd.Series: Signaux finaux
         """
+        # Vérifier si les données sont vides
+        if data is None or data.empty or len(data) < 10:  # Au moins 10 lignes
+            logger.warning(f"Données insuffisantes pour la stratégie {self.name}: {len(data) if data is not None else 0} lignes")
+            return pd.Series(0, index=data.index if data is not None and not data.empty else [])
+            
+        # Vérifier pour les valeurs NaN
+        if data.isnull().any().any():
+            logger.warning(f"Les données contiennent des valeurs NaN pour la stratégie {self.name}")
+            # Remplir les valeurs NaN ou les supprimer si nécessaire
+            data = data.fillna(method='ffill').fillna(method='bfill')
+        
         # Prétraitement des données
         preprocessed_data = self.preprocess_data(data)
+        
+        # Imprimer quelques informations sur les données
+        logger.info(f"Données prétraitées pour {self.name}: {len(preprocessed_data)} lignes de {preprocessed_data.index.min()} à {preprocessed_data.index.max()}")
         
         # Génération des signaux
         signals = self.generate_signals(preprocessed_data)
         
+        # Vérifier si des signaux ont été générés
+        if signals.sum() == 0 and (signals != 0).sum() == 0:
+            logger.warning(f"Aucun signal généré par la stratégie {self.name}")
+        else:
+            num_signals = (signals != 0).sum()
+            logger.info(f"Stratégie {self.name}: {num_signals} signaux générés ({(signals == 1).sum()} achats, {(signals == -1).sum()} ventes)")
+        
         # Post-traitement des signaux
         final_signals = self.postprocess_signals(signals, preprocessed_data)
         
-        logger.info(f"Stratégie {self.name}: {len(final_signals[final_signals != 0])} signaux générés")
+        # Vérifier si des signaux finaux ont été générés
+        if final_signals.sum() == 0 and (final_signals != 0).sum() == 0:
+            logger.warning(f"Aucun signal final généré par la stratégie {self.name} après post-traitement")
         
         return final_signals
-    
+
     def calculate_dynamic_stop_loss(self, data, position_type, entry_price, atr_multiplier=2.0):
         """
         Calcule un stop loss dynamique basé sur l'ATR

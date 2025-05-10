@@ -61,112 +61,35 @@ class TrendFollowingStrategy(BaseStrategy):
     def generate_signals(self, data):
         """
         Génère les signaux de trading basés sur la tendance
-        
-        Args:
-            data (pd.DataFrame): DataFrame avec les données et indicateurs
-            
-        Returns:
-            pd.Series: Série contenant les signaux (1=achat, -1=vente, 0=neutre)
         """
         # Initialiser les signaux à zéro
         signals = pd.Series(0, index=data.index)
         
-        # Récupérer les paramètres
-        fast_ema = self.params['fast_ema']
-        medium_ema = self.params['medium_ema']
-        slow_ema = self.params['slow_ema']
-        very_slow_ema = self.params['very_slow_ema']
-        
-        macd_fast = self.params['macd_fast']
-        macd_slow = self.params['macd_slow']
-        macd_signal = self.params['macd_signal']
-        
-        adx_threshold = self.params['adx_threshold']
-        
-        buy_threshold = self.params['buy_threshold']
-        sell_threshold = self.params['sell_threshold']
-        
-        # --- 1. Signaux basés sur les croisements de moyennes mobiles ---
-        
-        # Croisements entre EMA rapide et moyenne
-        ema_cross_signals = np.zeros(len(data))
-        ema_cross_signals[(data[f'ema_{fast_ema}'] > data[f'ema_{medium_ema}']) & 
-                        (data[f'ema_{fast_ema}'].shift(1) <= data[f'ema_{medium_ema}'].shift(1))] = 1
-        ema_cross_signals[(data[f'ema_{fast_ema}'] < data[f'ema_{medium_ema}']) & 
-                        (data[f'ema_{fast_ema}'].shift(1) >= data[f'ema_{medium_ema}'].shift(1))] = -1
-        
-        # Croisements entre EMA moyenne et lente
-        ema_cross_signals[(data[f'ema_{medium_ema}'] > data[f'ema_{slow_ema}']) & 
-                        (data[f'ema_{medium_ema}'].shift(1) <= data[f'ema_{slow_ema}'].shift(1))] += 0.5
-        ema_cross_signals[(data[f'ema_{medium_ema}'] < data[f'ema_{slow_ema}']) & 
-                        (data[f'ema_{medium_ema}'].shift(1) >= data[f'ema_{slow_ema}'].shift(1))] -= 0.5
-        
-        # --- 2. Signaux basés sur MACD ---
-        
-        macd_signals = np.zeros(len(data))
-        macd_signals[(data['macd'] > data['macd_signal']) & 
-                    (data['macd'].shift(1) <= data['macd_signal'].shift(1))] = 1
-        macd_signals[(data['macd'] < data['macd_signal']) & 
-                    (data['macd'].shift(1) >= data['macd_signal'].shift(1))] = -1
-        
-        # MACD au-dessus/en-dessous de zéro (confirmation de tendance)
-        macd_zero_cross = np.zeros(len(data))
-        macd_zero_cross[data['macd'] > 0] = 0.3
-        macd_zero_cross[data['macd'] < 0] = -0.3
-        
-        # --- 3. Signaux basés sur ADX (force de tendance) ---
-        
-        adx_signals = np.zeros(len(data))
-        
-        # ADX élevé indique une forte tendance
-        strong_trend = data['adx'] > adx_threshold
-        
-        # Direction de la tendance (+DI/-DI)
-        trend_direction = np.zeros(len(data))
-        trend_direction[data['adx_plus_di'] > data['adx_minus_di']] = 0.5
-        trend_direction[data['adx_plus_di'] < data['adx_minus_di']] = -0.5
-        
-        # Combiner ADX et direction
-        adx_signals = trend_direction * strong_trend
-        
-        # --- 4. Signaux basés sur la tendance globale (EMA 50/200) ---
-        
-        trend_signals = np.zeros(len(data))
-        
-        # Golden Cross / Death Cross
-        trend_signals[(data[f'ema_{slow_ema}'] > data[f'ema_{very_slow_ema}']) & 
-                    (data[f'ema_{slow_ema}'].shift(1) <= data[f'ema_{very_slow_ema}'].shift(1))] = 1
-        trend_signals[(data[f'ema_{slow_ema}'] < data[f'ema_{very_slow_ema}']) & 
-                    (data[f'ema_{slow_ema}'].shift(1) >= data[f'ema_{very_slow_ema}'].shift(1))] = -1
-        
-        # Tendance actuelle
-        current_trend = np.zeros(len(data))
-        current_trend[data[f'ema_{slow_ema}'] > data[f'ema_{very_slow_ema}']] = 0.2
-        current_trend[data[f'ema_{slow_ema}'] < data[f'ema_{very_slow_ema}']] = -0.2
-        
-        # --- 5. Combinaison des signaux ---
-        
-        # Pondération des différents signaux
-        ema_weight = 0.4
-        macd_weight = 0.3
-        adx_weight = 0.2
-        trend_weight = 0.1
-        
-        # Signal combiné
-        combined_signals = (
-            ema_cross_signals * ema_weight + 
-            (macd_signals + macd_zero_cross) * macd_weight + 
-            adx_signals * adx_weight + 
-            (trend_signals + current_trend) * trend_weight
-        )
-        
-        # --- 6. Génération des signaux finaux basés sur les seuils ---
-        
-        signals[combined_signals > buy_threshold] = 1  # Signal d'achat
-        signals[combined_signals < sell_threshold] = -1  # Signal de vente
+        # Version simplifiée et plus sensible
+        for i in range(1, len(data)):
+            # Signal d'achat: croisement EMA 8 au-dessus de EMA 21 + MACD positif
+            if (data['ema_8'].iloc[i] > data['ema_21'].iloc[i] and 
+                data['ema_8'].iloc[i-1] <= data['ema_21'].iloc[i-1] and
+                data['macd'].iloc[i] > 0):
+                signals.iloc[i] = 1
+                
+            # Signal de vente: croisement EMA 8 en-dessous de EMA 21 + MACD négatif
+            elif (data['ema_8'].iloc[i] < data['ema_21'].iloc[i] and 
+                data['ema_8'].iloc[i-1] >= data['ema_21'].iloc[i-1] and
+                data['macd'].iloc[i] < 0):
+                signals.iloc[i] = -1
+                
+            # Signaux supplémentaires basés uniquement sur MACD
+            elif (data['macd'].iloc[i] > data['macd_signal'].iloc[i] and 
+                data['macd'].iloc[i-1] <= data['macd_signal'].iloc[i-1]):
+                signals.iloc[i] = 1
+                
+            elif (data['macd'].iloc[i] < data['macd_signal'].iloc[i] and 
+                data['macd'].iloc[i-1] >= data['macd_signal'].iloc[i-1]):
+                signals.iloc[i] = -1
         
         return signals
-    
+
     def postprocess_signals(self, signals, data):
         """
         Post-traite les signaux générés pour éliminer les faux signaux

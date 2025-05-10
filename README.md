@@ -99,7 +99,7 @@ trading-bot/
 Pour tester une stratégie sur des données historiques :
 
 ```bash
-python backtest.py --strategy combined --symbol BTC/USDT --timeframe 1h --start 2020-01-01 --end 2021-01-01
+python3 backtest.py --strategy combined --symbol BTC/USDT --timeframe 1h --start 2020-01-01 --end 2020-01-31
 ```
 
 Options disponibles :

@@ -94,20 +94,14 @@ ARBITRAGE_PARAMS = {
 
 # Paramètres pour la stratégie combinée
 COMBINED_STRATEGY_PARAMS = {
-    # Seuils de signaux finaux
-    "final_buy_threshold": 0.5,
-    "final_sell_threshold": -0.5,
-    
-    # Ajustement des poids selon la volatilité du marché
-    "adjust_weights_by_volatility": True,
-    
-    # Filtres supplémentaires
+    "final_buy_threshold": 0.2685454584169793,
+    "final_sell_threshold": -0.4850954796580449,
+    "adjust_weights_by_volatility": False,
     "use_volume_filter": True,
-    "volume_threshold": 1.5,  # Volume > 1.5x volume moyen
-    
-    # Paramètres de confirmation multi-timeframes
-    "use_multi_timeframe": True,
-    "timeframe_alignment_required": False,  # Si True, toutes les timeframes doivent être alignées
+    "volume_threshold": 1.6291382164340402,
+    "use_multi_timeframe": False,
+    "cooldown_period": 4,
+    "timeframe_alignment_required": False,
 }
 
 # Paramètres de gestion des risques et des positions

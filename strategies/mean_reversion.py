@@ -60,126 +60,30 @@ class MeanReversionStrategy(BaseStrategy):
     def generate_signals(self, data):
         """
         Génère les signaux de trading basés sur le retour à la moyenne
-        
-        Args:
-            data (pd.DataFrame): DataFrame avec les données et indicateurs
-            
-        Returns:
-            pd.Series: Série contenant les signaux (1=achat, -1=vente, 0=neutre)
         """
         # Initialiser les signaux à zéro
         signals = pd.Series(0, index=data.index)
         
-        # Récupérer les paramètres
-        rsi_period = self.params['rsi_period']
-        rsi_overbought = self.params['rsi_overbought']
-        rsi_oversold = self.params['rsi_oversold']
-        
-        bb_period = self.params['bb_period']
-        bb_std = self.params['bb_std']
-        
-        stoch_overbought = self.params['stoch_overbought']
-        stoch_oversold = self.params['stoch_oversold']
-        
-        cci_overbought = self.params['cci_overbought']
-        cci_oversold = self.params['cci_oversold']
-        
-        buy_threshold = self.params['buy_threshold']
-        sell_threshold = self.params['sell_threshold']
-        
-        # --- 1. Signaux basés sur le RSI ---
-        
-        rsi_signals = np.zeros(len(data))
-        
-        # Conditions de surachat/survente
-        rsi_signals[data['rsi_14'] < rsi_oversold] = 1
-        rsi_signals[data['rsi_14'] > rsi_overbought] = -1
-        
-        # Divergences (optionnel)
-        # Divergence haussière: prix baisse mais RSI monte
-        rsi_signals[(data['close'] < data['close'].shift(1)) & 
-                   (data['rsi_14'] > data['rsi_14'].shift(1)) & 
-                   (data['rsi_14'] < 50)] += 0.5
-        
-        # Divergence baissière: prix monte mais RSI baisse
-        rsi_signals[(data['close'] > data['close'].shift(1)) & 
-                   (data['rsi_14'] < data['rsi_14'].shift(1)) & 
-                   (data['rsi_14'] > 50)] -= 0.5
-        
-        # --- 2. Signaux basés sur les Bandes de Bollinger ---
-        
-        bb_signals = np.zeros(len(data))
-        
-        # Dépassement des bandes
-        bb_signals[data['close'] < data['bb_lower']] = 1
-        bb_signals[data['close'] > data['bb_upper']] = -1
-        
-        # Retour à l'intérieur des bandes (confirmation)
-        bb_signals[(data['close'] > data['bb_lower']) & 
-                  (data['close'].shift(1) <= data['bb_lower'].shift(1))] += 0.5
-        bb_signals[(data['close'] < data['bb_upper']) & 
-                  (data['close'].shift(1) >= data['bb_upper'].shift(1))] -= 0.5
-        
-        # Compression des bandes (squeeze) suivi d'une expansion
-        bb_width = (data['bb_upper'] - data['bb_lower']) / data['bb_middle']
-        bb_width_ma = bb_width.rolling(window=20).mean()
-        
-        squeeze = (bb_width < bb_width_ma * 0.8).astype(int)
-        squeeze_release = ((squeeze.shift(1) == 1) & (squeeze == 0)).astype(int)
-        
-        # Ne pas générer de signal spécifique pour le squeeze, mais l'utiliser comme filtre
-        
-        # --- 3. Signaux basés sur le Stochastique ---
-        
-        stoch_signals = np.zeros(len(data))
-        
-        # Survente/surachat
-        stoch_signals[(data['stoch_k'] < stoch_oversold) & (data['stoch_d'] < stoch_oversold)] = 1
-        stoch_signals[(data['stoch_k'] > stoch_overbought) & (data['stoch_d'] > stoch_overbought)] = -1
-        
-        # Croisement
-        stoch_signals[(data['stoch_k'] > data['stoch_d']) & 
-                     (data['stoch_k'].shift(1) <= data['stoch_d'].shift(1)) & 
-                     (data['stoch_k'] < 50)] += 0.5
-        stoch_signals[(data['stoch_k'] < data['stoch_d']) & 
-                     (data['stoch_k'].shift(1) >= data['stoch_d'].shift(1)) & 
-                     (data['stoch_k'] > 50)] -= 0.5
-        
-        # --- 4. Signaux basés sur le CCI ---
-        
-        cci_signals = np.zeros(len(data))
-        
-        # Survente/surachat
-        cci_signals[data['cci_14'] < cci_oversold] = 1
-        cci_signals[data['cci_14'] > cci_overbought] = -1
-        
-        # Retour vers zéro depuis des extrêmes
-        cci_signals[(data['cci_14'] > -100) & (data['cci_14'].shift(1) <= -100)] += 0.3
-        cci_signals[(data['cci_14'] < 100) & (data['cci_14'].shift(1) >= 100)] -= 0.3
-        
-        # --- 5. Combinaison des signaux ---
-        
-        # Pondération des différents signaux
-        rsi_weight = 0.35
-        bb_weight = 0.35
-        stoch_weight = 0.2
-        cci_weight = 0.1
-        
-        # Signal combiné
-        combined_signals = (
-            rsi_signals * rsi_weight + 
-            bb_signals * bb_weight + 
-            stoch_signals * stoch_weight + 
-            cci_signals * cci_weight
-        )
-        
-        # --- 6. Génération des signaux finaux basés sur les seuils ---
-        
-        signals[combined_signals > buy_threshold] = 1  # Signal d'achat
-        signals[combined_signals < sell_threshold] = -1  # Signal de vente
+        # Version simplifiée pour produire plus de signaux
+        for i in range(1, len(data)):
+            # Signal d'achat: RSI < 30 (survente)
+            if data['rsi_14'].iloc[i] < 30:
+                signals.iloc[i] = 1
+                
+            # Signal de vente: RSI > 70 (surachat)
+            elif data['rsi_14'].iloc[i] > 70:
+                signals.iloc[i] = -1
+                
+            # Signal d'achat supplémentaire: prix en dessous de la bande de Bollinger inférieure
+            elif data['close'].iloc[i] < data['bb_lower'].iloc[i]:
+                signals.iloc[i] = 1
+                
+            # Signal de vente supplémentaire: prix au-dessus de la bande de Bollinger supérieure
+            elif data['close'].iloc[i] > data['bb_upper'].iloc[i]:
+                signals.iloc[i] = -1
         
         return signals
-    
+
     def postprocess_signals(self, signals, data):
         """
         Post-traite les signaux générés pour éliminer les faux signaux

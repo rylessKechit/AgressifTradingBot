@@ -19,13 +19,6 @@ class TechnicalIndicators:
     def add_all_indicators(df, include_patterns=True):
         """
         Ajoute tous les indicateurs techniques au DataFrame
-        
-        Args:
-            df (pd.DataFrame): DataFrame avec les colonnes OHLCV
-            include_patterns (bool, optional): Inclure les patterns de chandeliers
-            
-        Returns:
-            pd.DataFrame: DataFrame avec les indicateurs ajoutés
         """
         if df.empty:
             logger.warning("DataFrame vide, impossible d'ajouter les indicateurs")
@@ -38,52 +31,118 @@ class TechnicalIndicators:
                 logger.error(f"Colonne {col} manquante dans le DataFrame")
                 return df
                 
-        # Copie du DataFrame
-        df = df.copy()
+        # Copie du DataFrame pour éviter les warnings de fragmentation
+        df_copy = df.copy()
         
         # Convertir en numpy arrays pour talib
-        open_price = df['open'].values
-        high_price = df['high'].values
-        low_price = df['low'].values
-        close_price = df['close'].values
-        volume = df['volume'].values
+        open_price = df_copy['open'].values
+        high_price = df_copy['high'].values
+        low_price = df_copy['low'].values
+        close_price = df_copy['close'].values
+        volume = df_copy['volume'].values
         
         try:
-            # --- Indicateurs de tendance ---
-            TechnicalIndicators.add_moving_averages(df)
-            TechnicalIndicators.add_macd(df)
-            TechnicalIndicators.add_adx(df)
-            TechnicalIndicators.add_ichimoku(df)
+            # Créer des dictionnaires pour stocker les valeurs des indicateurs
+            trend_indicators = {}
+            momentum_indicators = {}
+            volatility_indicators = {}
+            volume_indicators = {}
             
-            # --- Indicateurs de momentum ---
-            TechnicalIndicators.add_rsi(df)
-            TechnicalIndicators.add_stochastic(df)
-            TechnicalIndicators.add_cci(df)
-            TechnicalIndicators.add_williams_r(df)
+            # --- Moyennes Mobiles (important pour les stratégies de tendance) ---
+            # EMA (Exponential Moving Average)
+            for period in [5, 8, 10, 12, 15, 20, 21, 25, 30, 50, 100, 200]:
+                trend_indicators[f'ema_{period}'] = talib.EMA(close_price, timeperiod=period)
             
-            # --- Indicateurs de volatilité ---
-            TechnicalIndicators.add_bollinger_bands(df)
-            TechnicalIndicators.add_atr(df)
+            # SMA (Simple Moving Average)
+            for period in [5, 8, 10, 20, 21, 50, 100, 200]:
+                trend_indicators[f'sma_{period}'] = talib.SMA(close_price, timeperiod=period)
             
-            # --- Indicateurs de volume ---
-            TechnicalIndicators.add_volume_indicators(df)
+            # Crosses
+            trend_indicators['ema_8_21_cross'] = np.where(
+                trend_indicators['ema_8'] > trend_indicators['ema_21'], 1, -1)
+            trend_indicators['ema_50_200_cross'] = np.where(
+                trend_indicators['ema_50'] > trend_indicators['ema_200'], 1, -1)
             
-            # --- Indicateurs de support/résistance ---
-            TechnicalIndicators.add_pivot_points(df)
+            # --- MACD ---
+            macd, macd_signal, macd_hist = talib.MACD(
+                close_price, fastperiod=12, slowperiod=26, signalperiod=9)
+            trend_indicators['macd'] = macd
+            trend_indicators['macd_signal'] = macd_signal
+            trend_indicators['macd_hist'] = macd_hist
             
-            # --- Patterns de chandeliers ---
+            # --- RSI ---
+            for period in [7, 14, 21]:
+                momentum_indicators[f'rsi_{period}'] = talib.RSI(close_price, timeperiod=period)
+            
+            # --- Bollinger Bands ---
+            upper, middle, lower = talib.BBANDS(
+                close_price, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+            volatility_indicators['bb_upper'] = upper
+            volatility_indicators['bb_middle'] = middle
+            volatility_indicators['bb_lower'] = lower
+            
+            # --- ATR (Average True Range) ---
+            for period in [7, 14, 21]:
+                volatility_indicators[f'atr_{period}'] = talib.ATR(
+                    high_price, low_price, close_price, timeperiod=period)
+            
+            # --- ADX (Average Directional Index) ---
+            trend_indicators['adx'] = talib.ADX(high_price, low_price, close_price, timeperiod=14)
+            trend_indicators['adx_plus_di'] = talib.PLUS_DI(high_price, low_price, close_price, timeperiod=14)
+            trend_indicators['adx_minus_di'] = talib.MINUS_DI(high_price, low_price, close_price, timeperiod=14)
+            
+            # --- Stochastic ---
+            momentum_indicators['stoch_k'], momentum_indicators['stoch_d'] = talib.STOCH(
+                high_price, low_price, close_price, 
+                fastk_period=14, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
+            
+            # --- Volumes ---
+            volume_indicators['volume_sma_20'] = talib.SMA(volume, timeperiod=20)
+            volume_indicators['volume_ratio'] = volume / volume_indicators['volume_sma_20']
+            
+            # Ajouter tous les indicateurs au DataFrame en une seule fois
+            # (évite la fragmentation)
+            all_indicators = {}
+            all_indicators.update(trend_indicators)
+            all_indicators.update(momentum_indicators)
+            all_indicators.update(volatility_indicators)
+            all_indicators.update(volume_indicators)
+            
+            # Créer un DataFrame avec tous les indicateurs
+            indicators_df = pd.DataFrame(all_indicators, index=df_copy.index)
+            
+            # Combiner avec le DataFrame original
+            df_with_indicators = pd.concat([df_copy, indicators_df], axis=1)
+            
+            # Ajout des indicateurs supplémentaires qui nécessitent les autres indicateurs
             if include_patterns:
-                TechnicalIndicators.add_candlestick_patterns(df)
+                pattern_signals = {}
+                # Patterns de chandeliers
+                for pattern_function in [
+                    talib.CDL2CROWS, talib.CDL3BLACKCROWS, talib.CDL3WHITESOLDIERS,
+                    talib.CDLENGULFING, talib.CDLHAMMER, talib.CDLMORNINGSTAR
+                ]:
+                    pattern_name = pattern_function.__name__[3:].lower()  # Enlève 'CDL' du nom
+                    pattern_signals[pattern_name] = pattern_function(
+                        open_price, high_price, low_price, close_price)
                 
-            # Supprimer les NaN
-            df.dropna(inplace=True)
+                # Ajouter les patterns au DataFrame
+                patterns_df = pd.DataFrame(pattern_signals, index=df_copy.index)
+                df_with_indicators = pd.concat([df_with_indicators, patterns_df], axis=1)
             
-            return df
+            # Supprimer les NaN
+            df_with_indicators.fillna(method='ffill', inplace=True)
+            df_with_indicators.fillna(method='bfill', inplace=True)
+            
+            # Vérification finale
+            logger.info(f"Indicateurs ajoutés: {df_with_indicators.shape[1] - df_copy.shape[1]} colonnes")
+            
+            return df_with_indicators
             
         except Exception as e:
             logger.error(f"Erreur lors de l'ajout des indicateurs: {e}")
-            return df
-    
+            return df_copy
+
     @staticmethod
     def add_moving_averages(df):
         """
@@ -93,16 +152,20 @@ class TechnicalIndicators:
         
         # SMA (Simple Moving Average)
         df['sma_5'] = talib.SMA(close_price, timeperiod=5)
+        df['sma_8'] = talib.SMA(close_price, timeperiod=8)  # Ajouté
         df['sma_10'] = talib.SMA(close_price, timeperiod=10)
         df['sma_20'] = talib.SMA(close_price, timeperiod=20)
+        df['sma_21'] = talib.SMA(close_price, timeperiod=21)  # Ajouté
         df['sma_50'] = talib.SMA(close_price, timeperiod=50)
         df['sma_100'] = talib.SMA(close_price, timeperiod=100)
         df['sma_200'] = talib.SMA(close_price, timeperiod=200)
         
         # EMA (Exponential Moving Average)
         df['ema_5'] = talib.EMA(close_price, timeperiod=5)
+        df['ema_8'] = talib.EMA(close_price, timeperiod=8)  # Ajouté
         df['ema_10'] = talib.EMA(close_price, timeperiod=10)
         df['ema_20'] = talib.EMA(close_price, timeperiod=20)
+        df['ema_21'] = talib.EMA(close_price, timeperiod=21)  # Ajouté
         df['ema_50'] = talib.EMA(close_price, timeperiod=50)
         df['ema_100'] = talib.EMA(close_price, timeperiod=100)
         df['ema_200'] = talib.EMA(close_price, timeperiod=200)
@@ -115,11 +178,12 @@ class TechnicalIndicators:
         
         # Crosses and slopes
         df['ema_5_10_cross'] = np.where(df['ema_5'] > df['ema_10'], 1, -1)
+        df['ema_8_21_cross'] = np.where(df['ema_8'] > df['ema_21'], 1, -1)  # Ajouté
         df['ema_10_20_cross'] = np.where(df['ema_10'] > df['ema_20'], 1, -1)
         df['ema_50_200_cross'] = np.where(df['ema_50'] > df['ema_200'], 1, -1)
         
         # Calcul des pentes (slopes)
-        for ma in ['ema_10', 'ema_20', 'ema_50', 'ema_200']:
+        for ma in ['ema_8', 'ema_10', 'ema_20', 'ema_21', 'ema_50', 'ema_200']:
             df[f'{ma}_slope'] = talib.LINEARREG_SLOPE(df[ma].values, timeperiod=5)
         
         return df

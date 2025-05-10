@@ -89,17 +89,10 @@ class Backtester:
     def run(self, symbol=None, timeframe=None):
         """
         Exécute le backtest
-        
-        Args:
-            symbol (str, optional): Symbole de la paire (ex: BTC/USDT)
-            timeframe (str, optional): Timeframe (ex: 15m, 1h, 4h)
-            
-        Returns:
-            dict: Résultats du backtest
         """
         # Utiliser les valeurs par défaut si non spécifiées
         symbol = symbol or TRADING.get('trading_pairs', ['BTC/USDT'])[0]
-        timeframe = timeframe or TRADING.get('timeframe', '1h')
+        timeframe = timeframe or TRADING.get('timeframe', '15m')  # Changer à 15m par défaut
         
         logger.info(f"Démarrage du backtest pour {symbol} sur {timeframe}")
         
@@ -110,25 +103,70 @@ class Backtester:
             if data is None or data.empty:
                 logger.error(f"Pas de données pour {symbol} sur {timeframe}")
                 return None
-                
+            
+            # Afficher des informations sur les données
+            logger.info(f"Données récupérées: {len(data)} lignes de {data.index.min()} à {data.index.max()}")
+            logger.info(f"Plage de prix: {data['low'].min():.2f} - {data['high'].max():.2f}")
+            
             # Ajouter les indicateurs techniques
             data = TechnicalIndicators.add_all_indicators(data)
             
+            # Vérifier que les indicateurs importants sont présents
+            required_indicators = [
+                'ema_8', 'ema_21', 'macd', 'macd_signal', 'rsi_14', 
+                'bb_upper', 'bb_middle', 'bb_lower'
+            ]
+            
+            missing = [ind for ind in required_indicators if ind not in data.columns]
+            if missing:
+                logger.error(f"Indicateurs manquants: {missing}")
+                return None
+                
             # Générer les signaux
             signals = self.strategy.run(data)
+            
+            # Vérifier si des signaux ont été générés
+            if signals is None or signals.empty:
+                logger.error(f"Pas de signaux générés pour {symbol} sur {timeframe}")
+                return None
+                
+            num_signals = (signals != 0).sum()
+            if num_signals == 0:
+                logger.error(f"Aucun signal non-nul généré pour {symbol} sur {timeframe}")
+                
+                # Debug: vérifier les croisements possibles
+                cross_up = ((data['ema_8'] > data['ema_21']) & 
+                        (data['ema_8'].shift(1) <= data['ema_21'].shift(1))).sum()
+                cross_down = ((data['ema_8'] < data['ema_21']) & 
+                            (data['ema_8'].shift(1) >= data['ema_21'].shift(1))).sum()
+                            
+                logger.info(f"Croisements EMA 8/21: {cross_up} haussiers, {cross_down} baissiers")
+                
+                # Vérifier les zones de surachat/survente RSI
+                rsi_overbought = (data['rsi_14'] > 70).sum()
+                rsi_oversold = (data['rsi_14'] < 30).sum()
+                
+                logger.info(f"RSI: {rsi_oversold} périodes de survente, {rsi_overbought} périodes de surachat")
+                
+                return None
+                
+            logger.info(f"{num_signals} signaux générés: {(signals == 1).sum()} achats, {(signals == -1).sum()} ventes")
             
             # Exécuter le backtest
             results = self._execute_backtest(symbol, data, signals)
             
             # Afficher les résultats
-            self._print_results(results)
+            if results:
+                self._print_results(results)
             
             return results
             
         except Exception as e:
             logger.error(f"Erreur lors du backtest: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
-    
+
     def _fetch_data(self, symbol, timeframe):
         """
         Récupère les données historiques
@@ -149,23 +187,32 @@ class Backtester:
                 end_date=self.end_date
             )
             
+            # Vérifier si les données sont vides
+            if data is None or (isinstance(data, pd.DataFrame) and data.empty):
+                logger.error(f"Aucune donnée récupérée pour {symbol} sur {timeframe}")
+                return pd.DataFrame()  # Retourner un DataFrame vide mais initialisé
+            
             # Si les données sont retournées sous forme de liste
             if isinstance(data, list):
+                if len(data) == 0:
+                    logger.error(f"Liste de données vide pour {symbol} sur {timeframe}")
+                    return pd.DataFrame()
+                    
                 # Convertir en DataFrame
                 df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 df.set_index('timestamp', inplace=True)
             else:
                 df = data
-                
-            logger.info(f"Données récupérées: {len(df)} bougies de {df.index.min()} à {df.index.max()}")
+                    
+            logger.info(f"Données récupérées: {len(df)} bougies de {df.index.min() if not df.empty else 'N/A'} à {df.index.max() if not df.empty else 'N/A'}")
             
             return df
             
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des données: {e}")
-            return None
-    
+            return pd.DataFrame()  # Retourner un DataFrame vide mais initialisé
+
     def _execute_backtest(self, symbol, data, signals):
         """
         Exécute le backtest
@@ -178,12 +225,22 @@ class Backtester:
         Returns:
             dict: Résultats du backtest
         """
+        # Vérifier si les données sont vides
+        if data.empty or len(data) == 0:
+            logger.error(f"Données vides pour {symbol}, impossible d'exécuter le backtest")
+            return None
+            
         # Réinitialiser le trader
         self.trader = Trader(position_sizer=self.position_sizer, mode="backtest")
         
+        # Vérifier s'il y a des données pour l'historique d'équité
+        if len(data.index) == 0:
+            logger.error("Aucune donnée disponible pour le backtest")
+            return None
+        
         # Historique de l'équité
         equity_history = [self.initial_capital]
-        dates = [data.index[0]]
+        dates = [data.index[0]]  # Assurez-vous que data a au moins une ligne
         
         # Exécuter les trades
         for i in range(1, len(data)):
